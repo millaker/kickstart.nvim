@@ -592,8 +592,6 @@ cmp.setup {
     ['<S-Tab>'] = cmp.mapping(function(fallback)
       if cmp.visible() then
         cmp.select_prev_item()
-      elseif luasnip.locally_jumpable(-1) then
-        luasnip.jump(-1)
       else
         fallback()
       end
@@ -601,7 +599,6 @@ cmp.setup {
   },
   sources = {
     { name = 'nvim_lsp' },
-    { name = 'luasnip' },
   },
 }
 
@@ -610,6 +607,7 @@ local Rule = require('nvim-autopairs.rule')
 local npairs = require('nvim-autopairs')
 
 npairs.add_rules({Rule("begin","end",{"verilog_systemverilog"})})
+npairs.add_rules({Rule("`", "`", {"-verilog_systemverilog"})})
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et

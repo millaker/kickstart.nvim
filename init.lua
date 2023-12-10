@@ -617,6 +617,7 @@ require('luasnip.loaders.from_vscode').lazy_load()
 luasnip.config.setup {}
 
 cmp.setup {
+  preselect = 'item',
   snippet = {
     expand = function(args)
       luasnip.lsp_expand(args.body)
@@ -634,7 +635,10 @@ cmp.setup {
       behavior = cmp.ConfirmBehavior.Insert,
       select = true,
     },
-    ['<Tab>'] = cmp.mapping.select_next_item({behavior = cmp.SelectBehavior.Insert})
+    ['<Tab>'] = cmp.mapping.confirm {
+      behavior = cmp.ConfirmBehavior.Insert,
+      select = true,
+    },
   },
   sources = {
     { name = 'nvim_lsp' },

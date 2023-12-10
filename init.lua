@@ -97,6 +97,8 @@ require('lazy').setup({
       'saadparwaiz1/cmp_luasnip',
       -- Adds LSP completion capabilities
       'hrsh7th/cmp-nvim-lsp',
+      -- Add signature help
+      'hrsh7th/cmp-nvim-lsp-signature-help',
     },
   },
 
@@ -198,6 +200,10 @@ require('lazy').setup({
     'windwp/nvim-autopairs',
     event = "InsertEnter",
     opts = {} -- this is equalent to setup({}) function
+  },
+
+  {
+    'mfussenegger/nvim-lint'
   },
 
 
@@ -415,10 +421,23 @@ vim.keymap.set('n', '<leader>sr', require('telescope.builtin').resume, { desc = 
 -- [[ Configure Treesitter ]]
 -- See `:help nvim-treesitter`
 -- Defer Treesitter setup after first render to improve startup time of 'nvim {filename}'
+local parser_config = require "nvim-treesitter.parsers".get_parser_configs()
+parser_config.bsv = {
+  install_info = {
+    url = "https://github.com/yuyuranium/tree-sitter-bsv", -- local path or git repo
+    files = {"src/parser.c"}, -- note that some parsers also require src/scanner.c or src/scanner.cc
+    -- optional entries:
+    branch = "main", -- default branch in case of git repo if different from master
+    generate_requires_npm = false, -- if stand-alone parser without npm dependencies
+    requires_generate_from_grammar = false, -- if folder contains pre-generated src/parser.c
+  },
+  filetype = "bsv", -- if filetype does not match the parser name
+}
+
 vim.defer_fn(function()
   require('nvim-treesitter.configs').setup {
     -- Add languages to be installed here that you want installed for treesitter
-    ensure_installed = { 'c', 'cpp', 'lua', 'python', 'rust', 'vimdoc', 'vim', 'bash' },
+    ensure_installed = { 'c', 'cpp', 'lua', 'python', 'rust', 'vimdoc', 'vim', 'bash', 'bsv' },
 
     -- Autoinstall languages that are not installed. Defaults to false (but you can change for yourself!)
     auto_install = false,
@@ -480,6 +499,8 @@ vim.defer_fn(function()
     },
   }
 end, 0)
+
+
 
 -- [[ Configure LSP ]]
 --  This function gets run when an LSP connects to a particular buffer.
@@ -570,6 +591,17 @@ mason_lspconfig.setup_handlers {
       filetypes = (servers[server_name] or {}).filetypes,
     }
   end,
+  ["clangd"] = function()
+      require('lspconfig').clangd.setup {
+        capabilities = capabilities,
+        on_attach = on_attach,
+        cmd = {
+          "clangd",
+          "--function-arg-placeholders=0",
+          "--header-insertion=never",
+        }
+      }
+  end,
 }
 
 -- [[ Configure nvim-cmp ]]
@@ -593,26 +625,15 @@ cmp.setup {
     ['<C-k>'] = cmp.mapping.select_prev_item(),
     ['<C-d>'] = cmp.mapping.scroll_docs(-4),
     ['<C-f>'] = cmp.mapping.scroll_docs(4),
-    ['<C-Space>'] = cmp.mapping.complete {},
     ['<CR>'] = cmp.mapping.confirm {
       behavior = cmp.ConfirmBehavior.Insert,
       select = true,
     },
-    ['<Tab>'] = cmp.mapping.confirm {
-      behavior = cmp.ConfirmBehavior.Insert,
-      select = true,
-    },
-    ['<S-Tab>'] = cmp.mapping(function(fallback)
-      if luasnip.locally_jumpable(-1) then
-        luasnip.jump(-1)
-      else
-        fallback()
-      end
-    end, { 'i', 's' }),
+    ['<Tab>'] = cmp.mapping.select_next_item({behavior = cmp.SelectBehavior.Insert})
   },
   sources = {
     { name = 'nvim_lsp' },
-    { name = 'luasnip'}
+    { name = 'nvim_lsp_signature_help'},
   },
 }
 
@@ -621,7 +642,74 @@ local Rule = require('nvim-autopairs.rule')
 local npairs = require('nvim-autopairs')
 
 npairs.add_rules({Rule("begin","end",{"verilog_systemverilog"})})
-npairs.add_rules({Rule("`", "`", {"-verilog_systemverilog"})})
+
+-- nvim-lint configs
+local function separateErrorChunks(input)
+  local errorChunks = {}
+  local matches = string.gmatch(input, "[^\r\n]+")
+  local str = ""
+  for l in matches do
+    if string.sub(l, 1, 5) == 'Error' then
+      if str ~= "" then
+        table.insert(errorChunks, str)
+      end
+      str = l .. '\n'
+    else
+      str = str .. l .. '\n'
+    end
+  end
+  table.insert(errorChunks, str)
+  return errorChunks
+end
+
+local parser = function(output, bufnr)
+    if vim.trim(output) == "" then
+      return {}
+    end
+    local errors = separateErrorChunks(output)
+    local diagnostics = {}
+    for _, e in ipairs(errors) do
+      -- match lnum and column
+      local file, lnum, col, tag = e:match('Error: "(.*)", line (%d+), column (%d+): %((.*)%)')
+      table.insert(diagnostics, {
+        file = file,
+        lnum = tonumber(lnum),
+        col = tonumber(col),
+        message = e,
+        severity = vim.diagnostic.severity.ERROR,
+        source = 'bsc',
+      })
+    end
+    return diagnostics
+  end
+
+require('lint').linters.bsv_lint = {
+  cmd = '/home/jacob/bsc/inst/bin/bsc',
+  stdin = false, -- or false if it doesn't support content input via stdin. In that case the filename is automatically added to the arguments.
+  append_fname = true, -- Automatically append the file name to `args` if `stdin = false` (default: true)
+  args = {
+    '-verilog',
+    '-bdir',
+    '/tmp',
+    '-vdir',
+    '/tmp',
+  }, -- list of arguments. Can contain functions with zero arguments that will be evaluated once the linter is used.
+  stream = 'stderr', -- ('stdout' | 'stderr' | 'both') configure the stream to which the linter outputs the linting result.
+  ignore_exitcode = true, -- set this to true if the linter exits with a code != 0 and that's considered normal.
+  env = nil, -- custom environment table to use with the external process. Note that this replaces the *entire* environment, it is not additive.
+  parser = parser
+}
+
+require('lint').linters_by_ft = {
+  bsv = {'bsv_lint'},
+}
+
+vim.api.nvim_create_autocmd({ "BufWritePost", "BufEnter" }, {
+  callback = function()
+    require("lint").try_lint()
+  end,
+})
+
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et

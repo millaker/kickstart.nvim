@@ -558,7 +558,6 @@ require('mason-lspconfig').setup()
 local servers = {
   verible = {},
   clangd = {},
-  pyright = {},
   lua_ls = {
     Lua = {
       workspace = { checkThirdParty = false },
@@ -566,6 +565,12 @@ local servers = {
     },
   },
 }
+
+local npm_valid = os.execute("which npm")
+
+if npm_valid == 0 then
+  servers['pyright'] = {}
+end
 
 -- Setup neovim lua configuration
 require('neodev').setup()
